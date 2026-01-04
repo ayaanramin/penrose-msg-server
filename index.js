@@ -61,25 +61,33 @@ wss.on("connection", (ws) => {
                 case "join":
                     currentRoom = data.roomId;
                     clientId = data.clientId;
+                    const username = data.username || clientId;
                     
                     if (!rooms.has(currentRoom)) {
-                        rooms.set(currentRoom, new Set());
+                        rooms.set(currentRoom, new Map());
                     }
                     
-                    rooms.get(currentRoom).add(ws);
+                    rooms.get(currentRoom).set(ws, { clientId, username });
                     ws.clientId = clientId;
+                    ws.username = username;
                     
-                    console.log(`Client ${clientId} joined room ${currentRoom} (${rooms.get(currentRoom).size} users)`);
+                    console.log(`${username} (${clientId}) joined room ${currentRoom} (${rooms.get(currentRoom).size} users)`);
+                    
+                    // Get list of all users in room
+                    const userList = Array.from(rooms.get(currentRoom).values()).map(u => u.username);
                     
                     broadcast(currentRoom, {
                         type: "user-joined",
                         clientId: clientId,
-                        userCount: rooms.get(currentRoom).size
+                        username: username,
+                        userCount: rooms.get(currentRoom).size,
+                        users: userList
                     }, ws);
                     
                     ws.send(JSON.stringify({
                         type: "room-info",
-                        userCount: rooms.get(currentRoom).size
+                        userCount: rooms.get(currentRoom).size,
+                        users: userList
                     }));
                     break;
 
@@ -88,7 +96,9 @@ wss.on("connection", (ws) => {
                         broadcast(currentRoom, {
                             type: "audio",
                             clientId: clientId,
-                            data: data.data
+                            username: ws.username,
+                            data: data.data,
+                            volume: data.volume || 0
                         }, ws);
                     }
                     break;
@@ -127,7 +137,7 @@ wss.on("connection", (ws) => {
         if (!rooms.has(roomId)) return;
         
         const messageStr = JSON.stringify(message);
-        rooms.get(roomId).forEach((client) => {
+        rooms.get(roomId).forEach((userInfo, client) => {
             if (client !== exclude && client.readyState === 1) { // WebSocket.OPEN
                 client.send(messageStr);
             }
@@ -136,6 +146,7 @@ wss.on("connection", (ws) => {
 
     function leaveRoom(ws, roomId, clientId) {
         if (roomId && rooms.has(roomId)) {
+            const username = ws.username || clientId;
             rooms.get(roomId).delete(ws);
             
             const remainingUsers = rooms.get(roomId).size;
@@ -144,12 +155,15 @@ wss.on("connection", (ws) => {
                 rooms.delete(roomId);
                 console.log(`Room ${roomId} deleted (empty)`);
             } else {
+                const userList = Array.from(rooms.get(roomId).values()).map(u => u.username);
                 broadcast(roomId, {
                     type: "user-left",
                     clientId: clientId,
-                    userCount: remainingUsers
+                    username: username,
+                    userCount: remainingUsers,
+                    users: userList
                 });
-                console.log(`Client ${clientId} left room ${roomId} (${remainingUsers} remaining)`);
+                console.log(`${username} left room ${roomId} (${remainingUsers} remaining)`);
             }
         }
     }
